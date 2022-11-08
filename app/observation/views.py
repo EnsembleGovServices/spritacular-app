@@ -1,8 +1,9 @@
 import datetime
 import json
 import logging
-
 import pytz
+import csv
+
 import pandas as pd
 from django.db.models import Q, Prefetch, OuterRef, Exists, Count
 from django.http import HttpResponse
@@ -19,7 +20,7 @@ from users.serializers import CameraSettingSerializer
 from users.permissions import IsAdminOrTrained, IsAdmin, IsObjectOwnerOrAdmin
 from .models import (Observation, Category, ObservationComment, ObservationLike, ObservationWatchCount,
                      VerifyObservation, ObservationReasonForReject, ObservationImageMapping, ObservationCategoryMapping)
-from users.models import CameraSetting
+from users.models import CameraSetting, User
 from constants import NOT_FOUND, OBS_FORM_SUCCESS, SOMETHING_WENT_WRONG, OBS_DRAFT_DELETE
 from rest_framework.pagination import PageNumberPagination, CursorPagination
 from sentry_sdk import capture_exception
@@ -116,8 +117,8 @@ class HomeViewSet(ListAPIView):
         observation_counts = Observation.objects.filter(is_submit=True, is_verified=True).aggregate(
             self_count=Count('pk', distinct=True),
             country_count=Count('observationimagemapping__country_code', distinct=True),
-            user_count=Count('user', distinct=True)
         )
+        user_count = User.objects.count()
 
         # observation_count = Observation.objects.filter().count()
         # observation_country_count = Observation.objects.distinct('observationimagemapping__country_code')
@@ -129,7 +130,7 @@ class HomeViewSet(ListAPIView):
         return Response({'data': {'latest_observation': serializer.data,
                                   'observation_count': observation_counts['self_count'],
                                   'observation_country_count': observation_counts['country_count'],
-                                  'observation_user_count': observation_counts['user_count']}},
+                                  'observation_user_count': user_count}},
                         status=status.HTTP_200_OK)
 
 
@@ -141,7 +142,8 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
     serializer_class = ObservationSerializer
 
     def get_permissions(self):
-        permission_classes = [IsAuthenticated, IsObjectOwnerOrAdmin] if self.action in ['destroy', 'retrieve', 'update'] else [IsAuthenticated]
+        permission_classes = [IsAuthenticated, IsObjectOwnerOrAdmin] if self.action in ['destroy', 'retrieve',
+                                                                                        'update'] else [IsAuthenticated]
         return [permission() for permission in permission_classes]
 
     def create(self, request, *args, **kwargs):
@@ -637,60 +639,121 @@ class ObservationDashboardViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response({'data': serializer.data})
 
 
+# class GenerateObservationCSVViewSet(APIView):
+#     """
+#     Generate observation data in csv api old way.
+#     storing all selected observation data in csv file.
+#     """
+#     permission_classes = (IsAuthenticated,)
+#
+#     def post(self, request, *args, **kwargs):
+#         observation_list = request.data.get('observation_ids', [])
+#         observation_filter = Observation.objects.filter(id__in=observation_list)
+#
+#         # fields for dataframe
+#         q = observation_filter.values('id',
+#                                       'user__first_name',
+#                                       'user__last_name',
+#                                       'observationimagemapping__country_code',
+#                                       'observationimagemapping__location',
+#                                       'observationimagemapping__latitude',
+#                                       'observationimagemapping__longitude',
+#                                       'observationimagemapping__obs_date_time_as_per_utc',
+#                                       'observationimagemapping__time_accuracy',
+#                                       'observationimagemapping__is_precise_azimuth',
+#                                       'observationimagemapping__azimuth',
+#                                       'observationimagemapping__timezone',
+#                                       'camera__camera_type',
+#                                       'camera__focal_length',
+#                                       'camera__aperture',
+#                                       'camera__iso',
+#                                       'camera__shutter_speed',
+#                                       'camera__fps',
+#                                       'camera__question_field_one',
+#                                       'camera__question_field_two',
+#                                       'elevation_angle',
+#                                       'video_url',
+#                                       'story',
+#                                       'media_file_url',
+#                                       'is_submit',
+#                                       'is_verified',
+#                                       'is_reject').distinct('id')
+#
+#         # converting queryset into dataframe
+#         df = pd.DataFrame.from_records(q)
+#
+#         # renaming column for csv file
+#         df.columns = ['id', 'first_name', 'last_name', 'country_code',
+#                       'location', 'latitude', 'longitude', 'obs_date_time_as_per_utc',
+#                       'time_accuracy', 'is_precise_azimuth', 'azimuth', 'timezone',
+#                       'camera_type', 'focal_length', 'aperture', 'iso', 'shutter_speed', 'fps',
+#                       'track_of_time', 'special_equipment_used', 'elevation_angle', 'video_url', 'story',
+#                       'media_file_url', 'is_submit', 'is_verified', 'is_reject']
+#
+#         # csv file generation
+#         response = HttpResponse(content_type='text/csv', status=status.HTTP_200_OK)
+#         response['Content-Disposition'] = 'attachment; filename=observation_data.csv'
+#         df.to_csv(path_or_buf=response, index=False)
+#
+#         return response
+
+
 class GenerateObservationCSVViewSet(APIView):
     """
-    Generate observation data in csv api
+    Generate observation data in csv api new way.
     storing all selected observation data in csv file.
     """
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
         observation_list = request.data.get('observation_ids', [])
-        observation_filter = Observation.objects.filter(id__in=observation_list)
+        observation_filter = ObservationImageMapping.objects.filter(
+            observation__id__in=observation_list
+        ).select_related('observation', 'observation__user', 'observation__camera')
 
-        # fields for dataframe
-        q = observation_filter.values('id',
-                                      'user__first_name',
-                                      'user__last_name',
-                                      'observationimagemapping__country_code',
-                                      'observationimagemapping__location',
-                                      'observationimagemapping__latitude',
-                                      'observationimagemapping__longitude',
-                                      'observationimagemapping__obs_date_time_as_per_utc',
-                                      'observationimagemapping__time_accuracy',
-                                      'observationimagemapping__is_precise_azimuth',
-                                      'observationimagemapping__azimuth',
-                                      'observationimagemapping__timezone',
-                                      'camera__camera_type',
-                                      'camera__focal_length',
-                                      'camera__aperture',
-                                      'camera__iso',
-                                      'camera__shutter_speed',
-                                      'camera__fps',
-                                      'camera__question_field_one',
-                                      'camera__question_field_two',
-                                      'elevation_angle',
-                                      'video_url',
-                                      'story',
-                                      'media_file_url',
-                                      'is_submit',
-                                      'is_verified',
-                                      'is_reject').distinct('id')
+        response = HttpResponse(
+            content_type='text/csv',
+            headers={'Content-Disposition': 'attachment; filename="observation_data.csv"'},
+        )
 
-        # converting queryset into dataframe
-        df = pd.DataFrame.from_records(q)
+        writer = csv.writer(response)
+        writer.writerow(['id', 'first_name', 'last_name', 'country_code',
+                         'location', 'latitude', 'longitude', 'obs_date_time_as_per_utc',
+                         'time_accuracy', 'is_precise_azimuth', 'azimuth', 'timezone',
+                         'camera_type', 'focal_length', 'aperture', 'iso', 'shutter_speed', 'fps',
+                         'track_of_time', 'special_equipment_used', 'elevation_angle', 'video_url', 'story',
+                         'media_file_url', 'is_submit', 'is_verified', 'is_reject', 'image_url'])
 
-        # renaming column for csv file
-        df.columns = ['id', 'first_name', 'last_name', 'country_code',
-                      'location', 'latitude', 'longitude', 'obs_date_time_as_per_utc',
-                      'time_accuracy', 'is_precise_azimuth', 'azimuth', 'timezone',
-                      'camera_type', 'focal_length', 'aperture', 'iso', 'shutter_speed', 'fps',
-                      'track_of_time', 'special_equipment_used', 'elevation_angle', 'video_url', 'story',
-                      'media_file_url', 'is_submit', 'is_verified', 'is_reject']
-
-        # csv file generation
-        response = HttpResponse(content_type='text/csv', status=status.HTTP_200_OK)
-        response['Content-Disposition'] = 'attachment; filename=observation_data.csv'
-        df.to_csv(path_or_buf=response, index=False)
+        for observation_obj in observation_filter:
+            writer.writerow([
+                observation_obj.observation_id,
+                observation_obj.observation.user.first_name,
+                observation_obj.observation.user.last_name,
+                observation_obj.country_code,
+                observation_obj.location,
+                observation_obj.latitude,
+                observation_obj.longitude,
+                observation_obj.obs_date_time_as_per_utc,
+                observation_obj.time_accuracy,
+                observation_obj.is_precise_azimuth,
+                observation_obj.azimuth,
+                observation_obj.timezone,
+                observation_obj.observation.camera.camera_type,
+                observation_obj.observation.camera.focal_length,
+                observation_obj.observation.camera.aperture,
+                observation_obj.observation.camera.iso,
+                observation_obj.observation.camera.shutter_speed,
+                observation_obj.observation.camera.fps,
+                observation_obj.observation.camera.question_field_one,
+                observation_obj.observation.camera.question_field_two,
+                observation_obj.observation.elevation_angle,
+                observation_obj.observation.video_url,
+                observation_obj.observation.story,
+                observation_obj.observation.media_file_url,
+                observation_obj.observation.is_submit,
+                observation_obj.observation.is_verified,
+                observation_obj.observation.is_reject,
+                observation_obj.image.url,
+             ])
 
         return response
