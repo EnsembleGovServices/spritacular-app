@@ -722,9 +722,19 @@ class GenerateObservationCSVViewSet(APIView):
                          'time_accuracy', 'is_precise_azimuth', 'azimuth', 'timezone',
                          'camera_type', 'focal_length', 'aperture', 'iso', 'shutter_speed', 'fps',
                          'track_of_time', 'special_equipment_used', 'elevation_angle', 'video_url', 'story',
-                         'media_file_url', 'is_submit', 'is_verified', 'is_reject', 'image_url'])
+                         'media_file_url', 'is_submit', 'is_verified', 'is_reject', 'image_url', 'category'])
 
+        category_data = {}
         for observation_obj in observation_filter:
+            if not category_data.get(observation_obj.id):
+                observation_category = ObservationCategoryMapping.objects.filter(
+                    observation=observation_obj.observation).select_related('category')
+                tle_category_list = [obs_cat_obj.category.title for obs_cat_obj in observation_category]
+                obs_category = ','.join(tle_category_list)
+                category_data[observation_obj.observation.id] = obs_category
+            else:
+                obs_category = category_data.get(observation_obj.id)
+
             writer.writerow([
                 observation_obj.observation_id,
                 observation_obj.observation.user.first_name,
@@ -754,6 +764,7 @@ class GenerateObservationCSVViewSet(APIView):
                 observation_obj.observation.is_verified,
                 observation_obj.observation.is_reject,
                 observation_obj.image.url,
+                obs_category
              ])
 
         return response
