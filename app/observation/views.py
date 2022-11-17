@@ -21,7 +21,8 @@ from users.permissions import IsAdminOrTrained, IsAdmin, IsObjectOwnerOrAdmin
 from .models import (Observation, Category, ObservationComment, ObservationLike, ObservationWatchCount,
                      VerifyObservation, ObservationReasonForReject, ObservationImageMapping, ObservationCategoryMapping)
 from users.models import CameraSetting, User
-from constants import NOT_FOUND, OBS_FORM_SUCCESS, SOMETHING_WENT_WRONG, OBS_DRAFT_DELETE
+from constants import NOT_FOUND, OBS_FORM_SUCCESS, SOMETHING_WENT_WRONG, OBS_DRAFT_DELETE, OBS_PUSH_BACK_SUCCESS, \
+    INVALID_ACTION
 from rest_framework.pagination import PageNumberPagination, CursorPagination
 from sentry_sdk import capture_exception
 
@@ -765,6 +766,31 @@ class GenerateObservationCSVViewSet(APIView):
                 observation_obj.observation.is_reject,
                 observation_obj.image.url,
                 obs_category
-             ])
+            ])
 
         return response
+
+
+class ObservationPushBackViewSet(APIView):
+    """
+    API to push back submitted observation back to draft state.
+    """
+
+    permission_classes = (IsAuthenticated, IsAdmin)
+
+    def put(self, request, *args, **kwargs):
+        observation_obj = get_object_or_404(Observation, pk=kwargs.get("pk"), is_submit=True,
+                                            is_verified=False, is_reject=False)
+
+        if observation_obj.is_submit and not observation_obj.is_verified and not observation_obj.is_reject:
+            observation_obj.is_submit = False
+            observation_obj.save(update_fields=["is_submit"])
+            # Send notification after observation push back
+            generate_and_send_notification_data("Observation Push Back",
+                                                "Your observation is pushed back to your draft tab. Please review your observation details.",
+                                                observation_obj.user, request.user, observation_obj, 'denied')
+            return Response(OBS_PUSH_BACK_SUCCESS, status=status.HTTP_200_OK)
+
+        return Response(INVALID_ACTION, status=status.HTTP_400_BAD_REQUEST)
+
+
