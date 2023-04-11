@@ -145,66 +145,48 @@ class ObservationSerializer(serializers.ModelSerializer):
     def validate(self, data):
         image_data = data.get('map_data')
         error_field = {}
-        is_error_flag = False
         if self.context.get('is_draft') is None:
-            for count, obs_data in enumerate(image_data):
-                error_field[count] = {}
-                if not obs_data['category_map']['category']:
-                    is_error_flag = True
-                    error_field[count]['category'] = FIELD_REQUIRED.format("Category")
+            for obs_data in image_data:
+                if obs_data.get('category_map') and not obs_data.get('category_map')['category']:
+                    error_field['category'] = [FIELD_REQUIRED.format("Category")]
 
-                elif not obs_data['location']:
-                    is_error_flag = True
-                    error_field[count]['location'] = FIELD_REQUIRED.format("Location")
+                elif not obs_data.get('location'):
+                    error_field['location'] = [FIELD_REQUIRED.format("Location")]
 
-                elif not obs_data['longitude']:
-                    is_error_flag = True
-                    error_field[count]['longitude'] = FIELD_REQUIRED.format("Longitude")
+                elif not obs_data.get('longitude'):
+                    error_field['longitude'] = [FIELD_REQUIRED.format("Longitude")]
 
-                elif not obs_data['latitude']:
-                    is_error_flag = True
-                    error_field[count]['latitude'] = FIELD_REQUIRED.format("Latitude")
+                elif not obs_data.get('latitude'):
+                    error_field['latitude'] = [FIELD_REQUIRED.format("Latitude")]
 
-                elif not obs_data['timezone']:
-                    is_error_flag = True
-                    error_field[count]['timezone'] = FIELD_REQUIRED.format("Timezone")
+                elif not obs_data.get('timezone'):
+                    error_field['timezone'] = [FIELD_REQUIRED.format("Timezone")]
 
-                elif not obs_data['obs_date']:
-                    is_error_flag = True
-                    error_field[count]['obs_date'] = FIELD_REQUIRED.format("Observation date")
+                elif not obs_data.get('obs_date'):
+                    error_field['obs_date'] = [FIELD_REQUIRED.format("Observation date")]
 
-                elif not obs_data['obs_time']:
-                    is_error_flag = True
-                    error_field[count]['obs_time'] = FIELD_REQUIRED.format("Observation time")
+                elif not obs_data.get('obs_time'):
+                    error_field['obs_time'] = [FIELD_REQUIRED.format("Observation time")]
 
-                elif not obs_data['azimuth']:
-                    is_error_flag = True
-                    error_field[count]['azimuth'] = FIELD_REQUIRED.format("Azimuth")
+                elif not obs_data.get('azimuth'):
+                    error_field['azimuth'] = [FIELD_REQUIRED.format("Azimuth")]
 
-                # elif (obs_data['azimuth'] and obs_data['azimuth'].isdigit()) and int(obs_data['azimuth']) > 360:
-                #     is_error_flag = True
-                #     error_field[count]['azimuth'] = 'Azimuth angle should not be more than 360°.'
-
-            if is_error_flag:
-                raise serializers.ValidationError(error_field, code=400)
+                if error_field:
+                    raise serializers.ValidationError(error_field, code=400)
 
         return data
 
     def create(self, validated_data):
         image_data = validated_data.pop('map_data')
-        camera_data = self.context.get('camera_data')
+        # camera_data = self.context.get('camera_data')
         # Flag for submit or draft request
         submit_flag = self.context.get('is_draft') is None
         observation = None
 
         self.validate_image_length(validated_data, image_data)
 
-        if validated_data.get('image_type') == 3 and len(image_data) <= 3:
-            camera_obj, observation = self.create_camera_observation(camera_data, validated_data, submit_flag)
-
         for data in image_data:
-            if validated_data.get('image_type') != 3:
-                camera_obj, observation = self.create_camera_observation(camera_data, validated_data, submit_flag)
+            observation = Observation.objects.create(**validated_data, is_submit=submit_flag)
 
             if data.get('category_map'):
                 category_data = data.pop('category_map')

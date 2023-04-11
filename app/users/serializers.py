@@ -142,7 +142,7 @@ class CameraSettingSerializer(serializers.ModelSerializer):
             self.fields['aperture'] = serializers.FloatField(required=True)
 
     def create(self, validated_data):
-        if CameraSetting.objects.filter(is_profile_camera_settings=True, user=validated_data.get('user')).exists():
+        if not self.context.get('observation_settings') and CameraSetting.objects.filter(is_profile_camera_settings=True, user=validated_data.get('user')).exists():
             raise serializers.ValidationError({'details': constants.CAMERA_SETTINGS_ALREADY_EXISTS}, code=400)
         camera_type = validated_data.get('camera_type')
         iso = validated_data.get('iso')

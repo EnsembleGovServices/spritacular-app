@@ -8,10 +8,11 @@ import pandas as pd
 from django.db.models import Q, Prefetch, OuterRef, Exists, Count
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.views import APIView, exception_handler
 
 from notification.signals import generate_and_send_notification_data
 from .serializers import (ObservationSerializer, ObservationCommentSerializer)
@@ -28,6 +29,7 @@ from sentry_sdk import capture_exception
 
 logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class CustomCursorPagination(CursorPagination):
@@ -140,13 +142,24 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
     CRUD operations for observations
     create, update, retrieve and user created observations.
     """
+
+    def handle_exception(self, exc):
+        response = exception_handler(exc, self.request)
+
+        if isinstance(exc, ValidationError):
+            response.data = {
+                'status': 0,
+                'detail': response.data
+            }
+
+        return response
+
     serializer_class = ObservationSerializer
 
     def get_permissions(self):
         permission_classes = [IsAuthenticated, IsObjectOwnerOrAdmin] if self.action in ['destroy', 'retrieve',
                                                                                         'update'] else [IsAuthenticated]
         return [permission() for permission in permission_classes]
-
     def create(self, request, *args, **kwargs):
         data = json.loads(request.data['data'])
 
@@ -160,20 +173,19 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
             # Adding is_draft for eliminating validations check.
             obs_context['is_draft'] = True
 
-        # if isinstance(camera_data, dict):
         camera_serializer = CameraSettingSerializer(data=camera_data, context=obs_context)
-
         obs_context['camera_data'] = camera_data
-
         observation_serializer = self.serializer_class(data=data, context=obs_context)
-        if observation_serializer.is_valid(raise_exception=True) and camera_serializer.is_valid(
-                raise_exception=True):
-            observation_serializer.save()
-            return Response(OBS_FORM_SUCCESS, status=status.HTTP_201_CREATED)
 
-        return Response({'observation_errors': observation_serializer.errors,
-                         'camera_errors': camera_serializer.errors, 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
+        observation_serializer.is_valid(raise_exception=True)
+        camera_serializer.is_valid(raise_exception=True)
 
+        obs_obj = observation_serializer.save()
+        camera_obj = camera_serializer.save()
+        obs_obj.camera = camera_obj
+        obs_obj.save(update_fields=["camera"])
+
+        return Response(OBS_FORM_SUCCESS, status=status.HTTP_201_CREATED)
     def update(self, request, *args, **kwargs):
         try:
             obs_obj = Observation.objects.get(pk=kwargs.get('pk'), user=request.user, is_submit=False)
@@ -196,15 +208,14 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
         camera_serializer = CameraSettingSerializer(instance=obs_obj.camera, data=camera_data, context=obs_context)
         observation_serializer = self.serializer_class(instance=obs_obj, data=data, context=obs_context)
 
-        if observation_serializer.is_valid(raise_exception=True) and camera_serializer.is_valid(raise_exception=True):
-            obs_obj = observation_serializer.save()
-            camera_obj = camera_serializer.save()
-            obs_obj.camera = camera_obj
-            obs_obj.save()
-            return Response(OBS_FORM_SUCCESS, status=status.HTTP_200_OK)
+        observation_serializer.is_valid(raise_exception=True)
+        camera_serializer.is_valid(raise_exception=True)
 
-        return Response({'observation_errors': observation_serializer.errors,
-                         'camera_errors': camera_serializer.errors, 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
+        observation_serializer.save()
+        camera_serializer.save()
+
+        return Response(OBS_FORM_SUCCESS, status=status.HTTP_200_OK)
+
 
     def retrieve(self, request, *args, **kwargs):
         try:
