@@ -6,6 +6,7 @@ import csv
 
 import pandas as pd
 from django.db.models import Q, Prefetch, OuterRef, Exists, Count
+from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
@@ -35,17 +36,6 @@ logger.setLevel(logging.DEBUG)
 class CustomCursorPagination(CursorPagination):
     page_size = 10
     ordering = '-id'
-
-
-# class ImageMetadataViewSet(APIView):
-#     serializer_class = ImageMetadataSerializer
-#
-#     def post(self, request, *args, **kwargs):
-#         serializer = self.serializer_class(data=request.data)
-#         if serializer.is_valid(raise_exception=True):
-#             response_data = serializer.get_exif_data(serializer.validated_data)
-#             return Response(json.loads(json.dumps(str(response_data))), status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -160,32 +150,35 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
         permission_classes = [IsAuthenticated, IsObjectOwnerOrAdmin] if self.action in ['destroy', 'retrieve',
                                                                                         'update'] else [IsAuthenticated]
         return [permission() for permission in permission_classes]
+
     def create(self, request, *args, **kwargs):
         data = json.loads(request.data['data'])
 
-        for i in request.FILES:
-            data['map_data'][int(i.split('_')[-1])]['image'] = request.FILES[i]
+        with transaction.atomic():
+            for i in request.FILES:
+                data['map_data'][int(i.split('_')[-1])]['image'] = request.FILES[i]
 
-        camera_data = data.pop('camera')
+            camera_data = data.pop('camera')
 
-        obs_context = {'request': request, 'observation_settings': True}
-        if 'is_draft' in data:
-            # Adding is_draft for eliminating validations check.
-            obs_context['is_draft'] = True
+            obs_context = {'request': request, 'observation_settings': True}
+            if 'is_draft' in data:
+                # Adding is_draft for eliminating validations check.
+                obs_context['is_draft'] = True
 
-        camera_serializer = CameraSettingSerializer(data=camera_data, context=obs_context)
-        obs_context['camera_data'] = camera_data
-        observation_serializer = self.serializer_class(data=data, context=obs_context)
+            camera_serializer = CameraSettingSerializer(data=camera_data, context=obs_context)
+            obs_context['camera_data'] = camera_data
+            observation_serializer = self.serializer_class(data=data, context=obs_context)
 
-        observation_serializer.is_valid(raise_exception=True)
-        camera_serializer.is_valid(raise_exception=True)
+            observation_serializer.is_valid(raise_exception=True)
+            camera_serializer.is_valid(raise_exception=True)
 
-        obs_obj = observation_serializer.save()
-        camera_obj = camera_serializer.save()
-        obs_obj.camera = camera_obj
-        obs_obj.save(update_fields=["camera"])
+            obs_obj = observation_serializer.save()
+            camera_obj = camera_serializer.save()
+            obs_obj.camera = camera_obj
+            obs_obj.save(update_fields=["camera"])
 
         return Response(OBS_FORM_SUCCESS, status=status.HTTP_201_CREATED)
+
     def update(self, request, *args, **kwargs):
         try:
             obs_obj = Observation.objects.get(pk=kwargs.get('pk'), user=request.user, is_submit=False)
@@ -195,24 +188,25 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
 
         data = json.loads(request.data['data'])
 
-        for file in request.FILES:
-            data['map_data'][int(file.split('_')[-1])]['image'] = request.FILES[file]
+        with transaction.atomic():
+            for file in request.FILES:
+                data['map_data'][int(file.split('_')[-1])]['image'] = request.FILES[file]
 
-        camera_data = data.pop('camera')
+            camera_data = data.pop('camera')
 
-        obs_context = {'request': request, 'observation_settings': True}
-        if 'is_draft' in data:
-            # Adding is_draft for eliminating validations check.
-            obs_context['is_draft'] = True
+            obs_context = {'request': request, 'observation_settings': True}
+            if 'is_draft' in data:
+                # Adding is_draft for eliminating validations check.
+                obs_context['is_draft'] = True
 
-        camera_serializer = CameraSettingSerializer(instance=obs_obj.camera, data=camera_data, context=obs_context)
-        observation_serializer = self.serializer_class(instance=obs_obj, data=data, context=obs_context)
+            camera_serializer = CameraSettingSerializer(instance=obs_obj.camera, data=camera_data, context=obs_context)
+            observation_serializer = self.serializer_class(instance=obs_obj, data=data, context=obs_context)
 
-        observation_serializer.is_valid(raise_exception=True)
-        camera_serializer.is_valid(raise_exception=True)
+            observation_serializer.is_valid(raise_exception=True)
+            camera_serializer.is_valid(raise_exception=True)
 
-        observation_serializer.save()
-        camera_serializer.save()
+            observation_serializer.save()
+            camera_serializer.save()
 
         return Response(OBS_FORM_SUCCESS, status=status.HTTP_200_OK)
 

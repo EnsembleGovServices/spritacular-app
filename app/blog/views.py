@@ -43,12 +43,8 @@ class BlogViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         blog_data = []
-        if kwargs.get('type') == 2:
-            query_set = Blog.objects.filter(article_type=Blog.TUTORIAL)
-        else:
-            query_set = Blog.objects.filter(article_type=Blog.BLOG)
 
-        for i in query_set:
+        for i in Blog.objects.filter(article_type=Blog.BLOG).order_by('-created_on'):
             record = {
                 "id": i.id,
                 "title": i.title,
@@ -66,16 +62,14 @@ class BlogViewSet(viewsets.ModelViewSet):
         return Response({'data': blog_data}, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        if not request.data.get('article_type'):
-            return Response({'detail': 'Article type not selected.', 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
         if request.data.get('thumbnail_image') == 'null':
             return Response({'detail': 'Thumbnail image not provided.', 'status': 0},
                             status=status.HTTP_400_BAD_REQUEST)
-        if int(request.data.get('article_type')) == 1 and not request.data.get('category'):
+        if not request.data.get('category'):
             return Response({'detail': 'Category not selected.', 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
 
         data = {
-            'article_type': 1 if int(request.data.get('article_type')) not in [1, 2] else int(request.data.get('article_type')),
+            'article_type': 1,
             'thumbnail_image': request.data.get('thumbnail_image'),
             'user': request.user,
             'title': request.data.get('title'),
@@ -105,17 +99,14 @@ class BlogViewSet(viewsets.ModelViewSet):
         if not blog_obj:
             print("Not found")
             return Response(constants.NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
-        if not request.data.get('article_type'):
-            return Response({'detail': 'Article type not selected.', 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
         if request.data.get('thumbnail_image') == 'null':
             return Response({'detail': 'Thumbnail image not provided.', 'status': 0},
                             status=status.HTTP_400_BAD_REQUEST)
-        if int(request.data.get('article_type')) == 1 and not request.data.get('category'):
+        if not request.data.get('category'):
             return Response({'detail': 'Category not selected.', 'status': 0}, status=status.HTTP_400_BAD_REQUEST)
 
         data = {
-            'article_type': 1 if int(request.data.get('article_type')) not in [1, 2] else int(
-                request.data.get('article_type')),
+            'article_type': 1,
             'thumbnail_image': request.data.get('thumbnail_image'),
             'user': request.user,
             'title': request.data.get('title'),
@@ -168,7 +159,7 @@ class BlogViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         blog_obj = get_object_or_404(Blog, slug=kwargs.get('slug'))
-        article_type = "Blog" if blog_obj.article_type == 1 else "Tutorial"
+        article_type = "Blog"
         blog_obj.delete()
 
         return Response({'success': f'{article_type} successfully deleted.', 'status': 1}, status=status.HTTP_200_OK)
@@ -210,13 +201,17 @@ class ContentManagementViewSet(viewsets.ModelViewSet):
             capture_exception(e)
             return None
 
-    def list(self, request, *args, **kwargs):
+    def retrieve(self, request, *args, **kwargs):
         page_name = kwargs.get('page')
-        content_obj = self.get_object(page_name)
-        if not content_obj:
-            return Response(constants.CONTENT_NOT_FOUND, status=status.HTTP_200_OK)
-
-        return Response({'title': content_obj.title, 'content': content_obj.content}, status=status.HTTP_200_OK)
+        content_obj = self.get_object(page_name=page_name)
+        return (
+            Response(
+                {'title': content_obj.title, 'content': content_obj.content},
+                status=status.HTTP_200_OK,
+            )
+            if content_obj
+            else Response(constants.CONTENT_NOT_FOUND, status=status.HTTP_200_OK)
+        )
 
     def create(self, request, *args, **kwargs):
         data = request.data
@@ -235,7 +230,7 @@ class ContentManagementViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         data = request.data
-        content_obj = self.get_object(type)
+        content_obj = self.get_object(page_name=kwargs.get('page'))
         if not content_obj:
             return Response(constants.CONTENT_NOT_FOUND, status=status.HTTP_200_OK)
 
@@ -259,7 +254,7 @@ class MeetTheTeamViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        return MeetTheTeam.objects.all()
+        return MeetTheTeam.objects.all().order_by('-id')
 
 
 

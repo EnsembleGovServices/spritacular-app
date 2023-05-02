@@ -22,7 +22,7 @@ urlpatterns = [
     path('api/devices/', FCMDeviceAuthorizedViewSet.as_view({'post': 'create'}), name='create_fcm_device'),
     path('api/blog/', include('blog.urls')),
     path('api/quiz/', include('quiz.urls')),
-    path('api/<str:page>/', ContentManagementViewSet.as_view({'post': 'create', 'put': 'update', 'get': 'list'}),
+    path('api/<str:page>/', ContentManagementViewSet.as_view({'post': 'create', 'put': 'update', 'get': 'retrieve'}),
          name='content_management'),
     # List spritacular team
     path('api/team/list_team/', MeetTheTeamViewSet.as_view({'get': 'list'}, name='list_team')),
