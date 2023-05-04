@@ -133,8 +133,13 @@ class ObservationSerializer(serializers.ModelSerializer):
 
         self.validate_image_length(validated_data, image_data)
 
-        for data in image_data:
+        if validated_data.get('image_type') == 3 and len(image_data) <= 3:
             observation = Observation.objects.create(**validated_data, is_submit=submit_flag)
+
+        image_maps = []
+        for data in image_data:
+            if validated_data.get('image_type') != 3:
+                observation = Observation.objects.create(**validated_data, is_submit=submit_flag)
 
             if data.get('category_map'):
                 category_data = data.pop('category_map')
@@ -154,9 +159,10 @@ class ObservationSerializer(serializers.ModelSerializer):
 
             if obs_image_map_obj.obs_date and obs_image_map_obj.obs_time:
                 obs_image_map_obj.set_utc()
-            get_original_image.delay(obs_image_map_obj.id)  # Calling celery task to save original image from local.
+            image_maps.append(obs_image_map_obj.id)
+            # get_original_image.delay(obs_image_map_obj.id)  # Calling celery task to save original image from local.
 
-        return observation
+        return observation, image_maps
 
     @staticmethod
     def validate_image_length(validated_data, image_data):
@@ -188,6 +194,7 @@ class ObservationSerializer(serializers.ModelSerializer):
         image_data = validated_data.pop('map_data')
         # Flag for submit or draft request
         submit_flag = self.context.get('is_draft') is None
+        image_maps = []
 
         if validated_data.get('image_type') in [1, 2] and len(image_data) > 1:
             raise serializers.ValidationError(SINGLE_IMAGE_VALID, code=400)
@@ -235,7 +242,8 @@ class ObservationSerializer(serializers.ModelSerializer):
                 obs_map_data.save()
                 if obs_map_data.obs_date and obs_map_data.obs_time:
                     obs_map_data.set_utc()
-                get_original_image.delay(obs_map_data.id)  # Calling celery task to save original image from local.
+                image_maps.append(obs_map_data.id)
+                # get_original_image.delay(obs_map_data.id)  # Calling celery task to save original image from local.
 
         else:
             ObservationImageMapping.objects.filter(observation=instance).delete()
@@ -253,9 +261,10 @@ class ObservationSerializer(serializers.ModelSerializer):
                                                                            image_name=image_file_name)
                 if obs_image_map_obj.obs_date and obs_image_map_obj.obs_time:
                     obs_image_map_obj.set_utc()
-                get_original_image.delay(obs_image_map_obj.id)  # Calling celery task to save original image from local.
+                image_maps.append(obs_image_map_obj.id)
+                # get_original_image.delay(obs_image_map_obj.id)  # Calling celery task to save original image from local.
 
-        return instance
+        return instance, image_maps
 
 
 class ObservationCommentSerializer(serializers.ModelSerializer):

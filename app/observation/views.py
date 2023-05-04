@@ -28,6 +28,8 @@ from constants import NOT_FOUND, OBS_FORM_SUCCESS, SOMETHING_WENT_WRONG, OBS_DRA
 from rest_framework.pagination import PageNumberPagination, CursorPagination
 from sentry_sdk import capture_exception
 
+from .tasks import get_original_image
+
 logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -172,10 +174,14 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
             observation_serializer.is_valid(raise_exception=True)
             camera_serializer.is_valid(raise_exception=True)
 
-            obs_obj = observation_serializer.save()
+            obs_obj, image_maps = observation_serializer.save()
             camera_obj = camera_serializer.save()
             obs_obj.camera = camera_obj
             obs_obj.save(update_fields=["camera"])
+
+        for map_id in image_maps:
+            logger.info(f"##{map_id}")
+            get_original_image.delay(map_id)
 
         return Response(OBS_FORM_SUCCESS, status=status.HTTP_201_CREATED)
 
@@ -205,8 +211,12 @@ class UploadObservationViewSet(viewsets.ModelViewSet):
             observation_serializer.is_valid(raise_exception=True)
             camera_serializer.is_valid(raise_exception=True)
 
-            observation_serializer.save()
+            obs_obj, image_maps = observation_serializer.save()
             camera_serializer.save()
+
+        for map_id in image_maps:
+            logger.info(f"##{map_id}")
+            get_original_image.delay(map_id)
 
         return Response(OBS_FORM_SUCCESS, status=status.HTTP_200_OK)
 
